@@ -1,10 +1,14 @@
 import type { ViteUserConfig } from "astro";
 
+import type { ContributorAliases } from "./git-blame.ts";
+
 type VitePlugin = NonNullable<ViteUserConfig["plugins"]>[number];
 
 export interface StarlightGitContributorsContext {
 	top: number;
 	ignore: readonly string[];
+	/** Blamed-name → display-name overrides. */
+	aliases: ContributorAliases;
 	/**
 	 * Omit to use the localized default from `i18n:setup`. Explicit
 	 * `undefined` is accepted and treated the same as omitting the key:

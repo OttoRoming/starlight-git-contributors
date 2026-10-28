@@ -267,3 +267,70 @@ test("cache: applyRankOptions filters and slices cached rankings", () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("cache: aliases apply on every read and never persist translated names", () => {
+	_resetCacheForTests();
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "sgc-alias-cache-")));
+	const git = (...args: string[]) =>
+		spawnSync("git", args, gitTestSpawnOptions(dir));
+	try {
+		git("init", "-q", "-b", "main");
+		git("config", "commit.gpgsign", "false");
+		git("config", "user.email", "alice@example.com");
+		git("config", "user.name", "Ailce");
+
+		const filePath = join(dir, "page.md");
+		writeFileSync(filePath, "one\n");
+		git("add", "page.md");
+		git("commit", "-q", "-m", "misspelled name");
+
+		git("config", "user.email", "alice-old@example.com");
+		git("config", "user.name", "Alice");
+		writeFileSync(filePath, "one\ntwo\n");
+		git("add", "page.md");
+		git("commit", "-q", "-m", "correct spelling");
+
+		const cold = contributorsForFile(filePath, {
+			onWarning: () => {},
+			cache: true,
+			aliases: { Ailce: "Alice" },
+		});
+		assert.equal(cold.length, 1);
+		assert.equal(expectDefined(cold[0]).name, "Alice");
+		assert.equal(expectDefined(cold[0]).lines, 2);
+
+		flushCache();
+
+		// The cache stores the raw blame ranking so a later alias change
+		// applies without re-running `git blame` or bumping the schema.
+		const stored = JSON.parse(readFileSync(cacheFilePath(dir), "utf8"));
+		const raw =
+			stored.entries[repoRelKey(realpathSync(dir), realpathSync(filePath))];
+		assert.ok(Array.isArray(raw), "expected a cached ranking array");
+		assert.deepEqual(
+			raw
+				.map((c: { name: string; lines: number }) => ({
+					name: c.name,
+					lines: c.lines,
+				}))
+				.sort((a, b) => a.name.localeCompare(b.name)),
+			[
+				{ name: "Ailce", lines: 1 },
+				{ name: "Alice", lines: 1 },
+			],
+			"cached ranking must keep original names and line counts",
+		);
+
+		_resetCacheForTests();
+		const warm = contributorsForFile(filePath, {
+			onWarning: () => {},
+			cache: true,
+			aliases: { Ailce: "Alicia", Alice: "Alicia" },
+		});
+		assert.equal(warm.length, 1, "warm read must merge translated names");
+		assert.equal(expectDefined(warm[0]).name, "Alicia");
+		assert.equal(expectDefined(warm[0]).lines, 2);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

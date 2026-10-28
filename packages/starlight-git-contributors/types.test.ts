@@ -6,6 +6,7 @@ import type {
 	BlameWarning,
 	BlameWarningHandler,
 	BlameWarningReason,
+	ContributorAliases,
 	ContributorsForFileOptions,
 	PrewarmOptions,
 	PrewarmResult,
@@ -67,6 +68,9 @@ _check<
 	>
 >(true);
 
+// ---- ContributorAliases ---------------------------------------------------
+_check<AssertEqual<ContributorAliases, Readonly<Record<string, string>>>>(true);
+
 // ---- RankOptions ----------------------------------------------------------
 _check<
 	AssertEqual<
@@ -74,6 +78,7 @@ _check<
 		{
 			top?: number;
 			ignore?: readonly string[];
+			aliases?: ContributorAliases;
 		}
 	>
 >(true);
@@ -179,6 +184,7 @@ _check<
 		| "overrideFooter"
 		| "top"
 		| "ignore"
+		| "aliases"
 		| "ariaLabel"
 		| "prewarm"
 		| "prewarmConcurrency"

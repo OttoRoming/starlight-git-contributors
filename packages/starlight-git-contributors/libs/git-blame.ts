@@ -21,9 +21,27 @@ export interface RankedContributor {
 	lines: number;
 }
 
+/**
+ * Maps a contributor name as reported by `git blame` to the name to
+ * display. Keys match the blamed name exactly. Useful when history
+ * contains a typo or a stale spelling that `.mailmap` can't fix (for
+ * example, a name change that should not rewrite git identity).
+ *
+ * Values are trimmed; an empty value falls back to the blamed name.
+ * Lookups are single-pass, so `{ A: "B", B: "C" }` maps `A` to `B`,
+ * not `C`.
+ */
+export type ContributorAliases = Readonly<Record<string, string>>;
+
 export interface RankOptions {
 	top?: number;
 	ignore?: readonly string[];
+	/**
+	 * Rename contributors before the final ranking. Contributors whose
+	 * translated names collide (case-insensitive) are merged into one
+	 * entry, so the returned list never contains duplicate names.
+	 */
+	aliases?: ContributorAliases;
 }
 
 /**
@@ -142,10 +160,13 @@ export function parseBlamePorcelain(porcelain: string): readonly BlamedLine[] {
 	return result;
 }
 
-export function rankContributors(
-	lines: readonly BlamedLine[],
-	options: RankOptions = {},
-): RankedContributor[] {
+/**
+ * Internal: count surviving lines per identity and sort the raw result.
+ * Kept separate from {@link rankContributors} so the on-disk cache can
+ * store an unfiltered, un-aliased ranking and re-apply display options
+ * on every read.
+ */
+function tallyContributors(lines: readonly BlamedLine[]): RankedContributor[] {
 	const tally = new Map<string, RankedContributor>();
 
 	for (const line of lines) {
@@ -158,10 +179,16 @@ export function rankContributors(
 		}
 	}
 
-	const ranked = [...tally.values()].sort(
+	return [...tally.values()].sort(
 		(a, b) => b.lines - a.lines || a.name.localeCompare(b.name),
 	);
-	return applyRankOptions(ranked, options);
+}
+
+export function rankContributors(
+	lines: readonly BlamedLine[],
+	options: RankOptions = {},
+): RankedContributor[] {
+	return applyRankOptions(tallyContributors(lines), options);
 }
 
 export interface BlameOptions {
@@ -403,8 +430,8 @@ export function isShallowRepo(from: string): boolean {
  * Set `cache: true` to persist the full ranking under `.git/info/` and
  * skip `git blame` on subsequent builds when neither HEAD nor `.mailmap`
  * changed for this file. The cache stores unfiltered rankings, so
- * `top`/`ignore` get re-applied on read and cache entries survive option
- * changes.
+ * `top`/`ignore`/`aliases` get re-applied on read and cache entries
+ * survive option changes.
  */
 export type ContributorsForFileOptions = RankOptions & {
 	onWarning?: BlameWarningHandler;
@@ -415,9 +442,9 @@ type CacheKey = { repoRoot: string; absFile: string };
 
 /**
  * Resolve cache identity for `filePath`, and check for a hot cache entry.
- * Returned `hit` is the pre-filter ranking; callers slice/ignore via
- * `applyRankOptions`. `null` cache key means caching is disabled or the
- * file isn't in any repo we recognize.
+ * Returned `hit` is the pre-filter ranking; callers apply aliases,
+ * ignore, and top via `applyRankOptions`. `null` cache key means caching
+ * is disabled or the file isn't in any repo we recognize.
  */
 function lookupCache(
 	filePath: string,
@@ -436,7 +463,7 @@ function finalizeBlame(
 	rank: RankOptions,
 ): RankedContributor[] {
 	if (!porcelain) return [];
-	const full = rankContributors(parseBlamePorcelain(porcelain));
+	const full = tallyContributors(parseBlamePorcelain(porcelain));
 	if (key) setCached(key.repoRoot, key.absFile, full);
 	return applyRankOptions(full, rank);
 }
@@ -450,8 +477,8 @@ function finalizeBlame(
  * Set `cache: true` to persist the full ranking under `.git/info/` and
  * skip `git blame` on subsequent builds when neither HEAD nor `.mailmap`
  * changed for this file. The cache stores unfiltered rankings, so
- * `top`/`ignore` get re-applied on read and cache entries survive option
- * changes.
+ * `top`/`ignore`/`aliases` get re-applied on read and cache entries
+ * survive option changes.
  */
 export function contributorsForFile(
 	filePath: string,
@@ -486,16 +513,64 @@ export async function contributorsForFileAsync(
 	return finalizeBlame(porcelain, key, rank);
 }
 
+/**
+ * Merge contributors that share a display name. Aliasing can collapse
+ * two identities ("Ailce" <a@x>, "Alice" <b@y>) into one name; without
+ * this step the rendered list would show the same name twice. Names are
+ * compared case-insensitively, keeping the name and email of the first
+ * (highest-line-count) member and summing every member's line count.
+ */
+function mergeByDisplayName(
+	ranking: readonly RankedContributor[],
+): RankedContributor[] {
+	const byName = new Map<string, RankedContributor>();
+
+	for (const contributor of ranking) {
+		const key = contributor.name.toLowerCase();
+		const existing = byName.get(key);
+		if (existing) {
+			existing.lines += contributor.lines;
+		} else {
+			// Clone: `ranking` may be a cached array, and merging mutates
+			// `lines` on the entry held in the map.
+			byName.set(key, { ...contributor });
+		}
+	}
+
+	return [...byName.values()].sort(
+		(a, b) => b.lines - a.lines || a.name.localeCompare(b.name),
+	);
+}
+
 function applyRankOptions(
 	ranking: readonly RankedContributor[],
 	options: RankOptions,
 ): RankedContributor[] {
+	const aliases = new Map(Object.entries(options.aliases ?? {}));
 	const ignore = new Set((options.ignore ?? []).map((s) => s.toLowerCase()));
-	const filtered = ranking.filter(
-		(r) =>
-			!ignore.has(r.email.toLowerCase()) && !ignore.has(r.name.toLowerCase()),
-	);
+
+	const renamed: RankedContributor[] = [];
+	for (const contributor of ranking) {
+		const aliasValue = aliases.get(contributor.name);
+		const alias = typeof aliasValue === "string" ? aliasValue.trim() : "";
+		const name = alias || contributor.name;
+		// Check the raw name as well as the translated one: an existing
+		// `ignore` entry should keep working when aliases are added.
+		if (
+			ignore.has(contributor.email.toLowerCase()) ||
+			ignore.has(contributor.name.toLowerCase()) ||
+			ignore.has(name.toLowerCase())
+		) {
+			continue;
+		}
+		renamed.push(
+			name === contributor.name ? contributor : { ...contributor, name },
+		);
+	}
+
+	// Merge before slicing so `top` counts distinct displayed names.
+	const merged = mergeByDisplayName(renamed);
 	return typeof options.top === "number"
-		? filtered.slice(0, options.top)
-		: filtered;
+		? merged.slice(0, options.top)
+		: merged;
 }

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { BlameWarning } from "./git-blame.ts";
+import type { BlamedLine, BlameWarning } from "./git-blame.ts";
 import {
 	consoleWarnOnce,
 	contributorsForFile,
@@ -55,6 +55,20 @@ filename docs/intro.md
 \tline three
 `;
 
+function syntheticBlame(
+	...entries: ReadonlyArray<
+		readonly [author: string, email: string, count: number]
+	>
+): BlamedLine[] {
+	const lines: BlamedLine[] = [];
+	for (const [author, email, count] of entries) {
+		for (let i = 0; i < count; i++) {
+			lines.push({ sha: "abc1234", author, email, timestamp: 0 });
+		}
+	}
+	return lines;
+}
+
 test("parseBlamePorcelain attributes each blamed line to its author", () => {
 	const lines = parseBlamePorcelain(sampleBlame);
 	assert.equal(lines.length, 3);
@@ -90,6 +104,86 @@ test("rankContributors respects top limit", () => {
 	const ranked = rankContributors(lines, { top: 1 });
 	assert.equal(ranked.length, 1);
 	assert.equal(expectDefined(ranked[0]).name, "Alice");
+});
+
+test("rankContributors translates contributor names through aliases", () => {
+	const ranked = rankContributors(parseBlamePorcelain(sampleBlame), {
+		aliases: { Bob: "Robert" },
+	});
+	assert.deepEqual(ranked, [
+		{ name: "Alice", email: "alice@example.com", lines: 2 },
+		{ name: "Robert", email: "bob@example.com", lines: 1 },
+	]);
+});
+
+test("rankContributors merges contributors that translate to the same name", () => {
+	const lines = syntheticBlame(
+		["Ailce", "alice@old.example", 3],
+		["Alice", "alice@example.com", 1],
+		["Bob", "bob@example.com", 1],
+	);
+	const ranked = rankContributors(lines, { aliases: { Ailce: "Alice" } });
+	assert.deepEqual(ranked, [
+		{ name: "Alice", email: "alice@old.example", lines: 4 },
+		{ name: "Bob", email: "bob@example.com", lines: 1 },
+	]);
+});
+
+test("rankContributors merges duplicate display names case-insensitively", () => {
+	const ranked = rankContributors(
+		syntheticBlame(
+			["Alice", "a@example.com", 2],
+			["ALICE", "b@example.com", 1],
+		),
+	);
+	assert.deepEqual(ranked, [
+		{
+			name: "Alice",
+			email: "a@example.com",
+			lines: 3,
+		},
+	]);
+});
+
+test("rankContributors applies top after alias merging", () => {
+	const lines = syntheticBlame(
+		["Ailce", "alice@old.example", 3],
+		["Alice", "alice@example.com", 3],
+		["Bob", "bob@example.com", 4],
+	);
+	const ranked = rankContributors(lines, {
+		aliases: { Ailce: "Alice" },
+		top: 1,
+	});
+	assert.deepEqual(ranked, [
+		{ name: "Alice", email: "alice@old.example", lines: 6 },
+	]);
+});
+
+test("rankContributors applies ignore to raw and translated names", () => {
+	const lines = syntheticBlame(
+		["Ailce", "alice@example.com", 2],
+		["Bob", "bob@example.com", 1],
+	);
+	const aliases = { Ailce: "Alice" };
+	assert.deepEqual(
+		rankContributors(lines, { aliases, ignore: ["Ailce"] }).map((c) => c.name),
+		["Bob"],
+	);
+	assert.deepEqual(
+		rankContributors(lines, { aliases, ignore: ["Alice"] }).map((c) => c.name),
+		["Bob"],
+	);
+});
+
+test("rankContributors falls back to the blamed name for empty aliases", () => {
+	const ranked = rankContributors(
+		syntheticBlame(["Alice", "alice@example.com", 1]),
+		{ aliases: { Alice: "" } },
+	);
+	assert.deepEqual(ranked, [
+		{ name: "Alice", email: "alice@example.com", lines: 1 },
+	]);
 });
 
 test("parseBlamePorcelain returns [] for empty input", () => {
@@ -281,6 +375,45 @@ test("contributorsForFile picks up .mailmap aliases (host-agnostic)", () => {
 		assert.equal(result.length, 1, "mailmap should collapse to one identity");
 		const head = expectDefined(result[0]);
 		assert.equal(head.email, "alice@example.com");
+		assert.equal(head.lines, 2);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("contributorsForFile applies aliases and merges duplicate display names", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "sgc-alias-"));
+	try {
+		const git = (...args: string[]) =>
+			spawnSync("git", args, gitTestSpawnOptions(dir));
+
+		git("init", "-q", "-b", "main");
+		git("config", "commit.gpgsign", "false");
+		git("config", "user.email", "alice@example.com");
+		git("config", "user.name", "Ailce");
+
+		const filePath = join(dir, "page.md");
+		writeFileSync(filePath, "one\n");
+		git("add", "page.md");
+		git("commit", "-q", "-m", "misspelled name");
+
+		git("config", "user.email", "alice-old@example.com");
+		git("config", "user.name", "Alice");
+		writeFileSync(filePath, "one\ntwo\n");
+		git("add", "page.md");
+		git("commit", "-q", "-m", "correct spelling");
+
+		const options = {
+			onWarning: () => {},
+			aliases: { Ailce: "Alice" },
+		};
+		const sync = contributorsForFile(filePath, options);
+		const async = await contributorsForFileAsync(filePath, options);
+
+		assert.deepEqual(sync, async, "sync and async must agree");
+		assert.equal(sync.length, 1, "aliases should merge into one entry");
+		const head = expectDefined(sync[0]);
+		assert.equal(head.name, "Alice");
 		assert.equal(head.lines, 2);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

@@ -20,4 +20,4 @@ Jane Doe <jane@example.com> <jane@oldcompany.com>
 Jane Doe <jane@example.com> <jane@github>
 ```
 
-Git applies these aliases automatically when it reads blame data.
+Git applies these aliases automatically when it reads blame data. Use `.mailmap` when the corrected identity should apply to every git tool. If you only need to change how this plugin displays a name, use the plugin's `aliases` option instead (see [Usage](/starlight-git-contributors/usage/#fixing-contributor-names)).

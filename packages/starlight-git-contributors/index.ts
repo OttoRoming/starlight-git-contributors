@@ -1,5 +1,6 @@
 import type { StarlightPlugin } from "@astrojs/starlight/types";
 
+import type { ContributorAliases } from "./libs/git-blame.ts";
 import {
 	buildIntegration,
 	decideFooterAction,
@@ -13,6 +14,7 @@ export type {
 	BlameWarning,
 	BlameWarningHandler,
 	BlameWarningReason,
+	ContributorAliases,
 	ContributorsForFileOptions,
 	RankedContributor,
 	RankOptions,
@@ -44,6 +46,13 @@ export interface StarlightGitContributorsOptions {
 	/** Names or emails to exclude from rankings (case-insensitive). Default: `[]`. */
 	ignore?: readonly string[];
 	/**
+	 * Map contributor names reported by `git blame` to the names to
+	 * display, e.g. to fix a typo baked into history. Keys match the
+	 * blamed name exactly. Contributors that translate to the same name
+	 * are merged, so the rendered list never repeats a name. Default: `{}`.
+	 */
+	aliases?: ContributorAliases;
+	/**
 	 * Accessible name applied to the contributor list region in the auto-wired
 	 * Footer. Overrides the localized default from `i18n:setup`.
 	 */
@@ -66,6 +75,7 @@ function resolveOptions(
 		overrideFooter: options.overrideFooter ?? true,
 		top: options.top ?? 5,
 		ignore: options.ignore ?? [],
+		aliases: options.aliases ?? {},
 		ariaLabel: options.ariaLabel,
 		prewarm: options.prewarm ?? true,
 		prewarmConcurrency: options.prewarmConcurrency ?? 8,

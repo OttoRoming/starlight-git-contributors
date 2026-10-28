@@ -52,6 +52,7 @@ test("buildIntegration: registers the documented integration name", () => {
 		overrideFooter: true,
 		top: 5,
 		ignore: [],
+		aliases: {},
 		ariaLabel: undefined,
 		prewarm: true,
 		prewarmConcurrency: 8,

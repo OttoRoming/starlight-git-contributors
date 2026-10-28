@@ -37,6 +37,7 @@ test("vite plugin: load returns a module exporting the serialized config", () =>
 	const source = buildModuleSource({
 		top: 5,
 		ignore: ["bot@example.com"],
+		aliases: { Ailce: "Alice" },
 		ariaLabel: "Contributors",
 	});
 	const loaded = loadVirtualModule(RESOLVED_ID, source);
@@ -46,6 +47,7 @@ test("vite plugin: load returns a module exporting the serialized config", () =>
 	assert.deepEqual(parseExportedJson(loaded), {
 		top: 5,
 		ignore: ["bot@example.com"],
+		aliases: { Ailce: "Alice" },
 		ariaLabel: "Contributors",
 	});
 });
@@ -54,6 +56,7 @@ test("vite plugin: load returns undefined for ids it does not own", () => {
 	const source = buildModuleSource({
 		top: 5,
 		ignore: [],
+		aliases: {},
 		ariaLabel: undefined,
 	});
 	assert.equal(loadVirtualModule(VIRTUAL_ID, source), undefined);
@@ -66,6 +69,7 @@ test("vite plugin: ariaLabel: undefined survives JSON serialization as missing k
 	const source = buildModuleSource({
 		top: 3,
 		ignore: [],
+		aliases: {},
 		ariaLabel: undefined,
 	});
 	const loaded = expectDefined(loadVirtualModule(RESOLVED_ID, source));

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { AstroConfig, AstroIntegration } from "astro";
 
 import { flushCache } from "./cache.ts";
+import type { ContributorAliases } from "./git-blame.ts";
 import { prewarmCache } from "./prewarm.ts";
 import { vitePluginStarlightGitContributors } from "./vite.ts";
 
@@ -10,6 +11,7 @@ export interface ResolvedOptions {
 	overrideFooter: boolean;
 	top: number;
 	ignore: readonly string[];
+	aliases: ContributorAliases;
 	ariaLabel: string | undefined;
 	prewarm: boolean;
 	prewarmConcurrency: number;
@@ -51,6 +53,7 @@ export function buildIntegration(opts: ResolvedOptions): AstroIntegration {
 							vitePluginStarlightGitContributors({
 								top: opts.top,
 								ignore: opts.ignore,
+								aliases: opts.aliases,
 								ariaLabel: opts.ariaLabel,
 							}),
 						],

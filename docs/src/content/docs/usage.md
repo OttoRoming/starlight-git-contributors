@@ -7,12 +7,13 @@ description: Plugin options, component props, programmatic API, failure modes.
 
 The plugin's credit line reads these. They have no effect when `overrideFooter: false`.
 
-| Option           | Type        | Default     | Description                                                                                                |
-| ---------------- | ----------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `overrideFooter` | `boolean`   | `true`      | Register the plugin's `Footer.astro` (default + appended credit line). Set `false` when you ship your own. |
-| `top`            | `number`    | `5`         | Max contributors per page, ordered by surviving lines descending.                                          |
-| `ignore`         | `string[]`  | `[]`        | Names or emails to exclude (case-insensitive). Useful for bots.                                            |
-| `ariaLabel`      | `string`    | `undefined` | Accessible name for the list region. Defaults to a localized i18n string.                                  |
+| Option           | Type                     | Default     | Description                                                                                                |
+| ---------------- | ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `overrideFooter` | `boolean`                | `true`      | Register the plugin's `Footer.astro` (default + appended credit line). Set `false` when you ship your own. |
+| `top`            | `number`                 | `5`         | Max contributors per page, ordered by surviving lines descending.                                          |
+| `ignore`         | `string[]`               | `[]`        | Names or emails to exclude (case-insensitive). Useful for bots.                                            |
+| `aliases`        | `Record<string, string>` | `{}`        | Blamed name → display name. Duplicate names merge.                                                         |
+| `ariaLabel`      | `string`                 | `undefined` | Accessible name for the list region. Defaults to a localized i18n string.                                  |
 
 ```js
 starlight({
@@ -20,22 +21,41 @@ starlight({
     starlightGitContributors({
       top: 3,
       ignore: ['dependabot[bot]', 'github-actions[bot]'],
+      aliases: { Ailce: 'Alice' },
     }),
   ],
 });
 ```
 
+## Fixing contributor names
+
+`git blame` reports the name stored in each commit, so a typo from years ago keeps showing up. Pass `aliases` to map blamed names to the names you want to display:
+
+```js
+starlightGitContributors({
+  aliases: {
+    Ailce: 'Alice',
+    'Alice L': 'Alice',
+  },
+});
+```
+
+Keys match the blamed name exactly (case-sensitive). Contributors whose translated names match are merged into a single entry (compared case-insensitively), with their line counts summed. Deduplication covers the whole ranking, so two git identities that already share a display name collapse too. Merging happens before `top`, so `top` counts distinct names and the rendered list never repeats one.
+
+Aliases are applied whenever a ranking is read, including cached rankings. Changing the map takes effect on the next build without clearing `.git/info/` or re-running `git blame`. When you need the rewrite to apply to every git tool (not just this plugin), use [`.mailmap`](/starlight-git-contributors/ci/#mailmap) instead.
+
 ## `<PageContributors />` props
 
 Use these props when you ship your own Footer with `overrideFooter: false`.
 
-| Prop        | Type       | Default         | Description                                                                                |
-| ----------- | ---------- | --------------- | ------------------------------------------------------------------------------------------ |
-| `filePath`  | `string`   | Starlight route | Absolute path to blame. Defaults to `Astro.locals.starlightRoute.entry.filePath`.          |
-| `top`       | `number`   | `5`             | Max contributors per page, ordered by surviving lines descending.                          |
-| `ignore`    | `string[]` | `[]`            | Names or emails to exclude (case-insensitive).                                             |
-| `icon`      | `boolean`  | `true`          | Show the leading person glyph. Pass `false` to omit, or use the `icon` slot to override.   |
-| `ariaLabel` | `string`   | `undefined`     | Accessible name for the list region. Pass a localized string.                              |
+| Prop        | Type                     | Default         | Description                                                                                |
+| ----------- | ------------------------ | --------------- | ------------------------------------------------------------------------------------------ |
+| `filePath`  | `string`                 | Starlight route | Absolute path to blame. Defaults to `Astro.locals.starlightRoute.entry.filePath`.          |
+| `top`       | `number`                 | `5`             | Max contributors per page, ordered by surviving lines descending.                          |
+| `ignore`    | `string[]`               | `[]`            | Names or emails to exclude (case-insensitive).                                             |
+| `aliases`   | `Record<string, string>` | `{}`            | Blamed name → display name. Duplicate names merge.                                         |
+| `icon`      | `boolean`                | `true`          | Show the leading person glyph. Pass `false` to omit, or use the `icon` slot to override.   |
+| `ariaLabel` | `string`                 | `undefined`     | Accessible name for the list region. Pass a localized string.                              |
 
 The component renders an inline `<span class="sgc-root">` of comma-separated names, ordered by surviving lines (most first). The icon switches between single-person and multi-people based on the count.
 
@@ -65,6 +85,7 @@ import {
 const top = contributorsForFile('/abs/path/to/file.md', {
   top: 5,
   ignore: ['dependabot[bot]'],
+  aliases: { Ailce: 'Alice' },
 });
 
 contributorsForFile(filePath, {

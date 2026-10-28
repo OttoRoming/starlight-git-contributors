@@ -1,8 +1,8 @@
 ---
 import { contributorsForFile, type RankOptions } from "../libs/git-blame.ts";
 
-// `top` and `ignore` inherit from RankOptions so renames in the data layer
-// propagate to the component without manual duplication.
+// `top`, `ignore`, and `aliases` inherit from RankOptions so renames in
+// the data layer propagate to the component without manual duplication.
 export interface Props extends RankOptions {
 	/**
 	 * Absolute path to the source file to blame. Defaults to the current
@@ -29,6 +29,7 @@ const {
 	filePath: explicit,
 	top = 5,
 	ignore,
+	aliases,
 	icon = true,
 	ariaLabel,
 } = Astro.props;
@@ -38,7 +39,7 @@ const filePath = explicit ?? starlightRoute?.entry?.filePath;
 const lang = starlightRoute?.lang ?? "en";
 
 const contributors = filePath
-	? contributorsForFile(filePath, { top, ignore, cache: true })
+	? contributorsForFile(filePath, { top, ignore, aliases, cache: true })
 	: [];
 const single = contributors.length === 1;
 
